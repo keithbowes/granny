@@ -1,0 +1,235 @@
+#!/usr/bin/perl
+#
+# what:      tranny, a language translator
+# project:   https://code.google.com/p/tranny/
+# copyright: Copyright 2010, Andrew Ault
+# license:   This content is released under the  http://code.google.com/p/tranny/wiki/license MIT License.
+#
+# Uses the JSON module from CPAN. To install: "sudo cpan JSON"
+#
+
+use strict;
+use warnings;
+use POSIX;
+use Getopt::Std;
+use JSON;
+use LWP;
+use Socket;
+
+require 'sys/ioctl.ph';
+die "no TIOCGWINSZ " unless defined &TIOCGWINSZ;
+
+my $original;
+my $winsize;
+my $has_tty = 1;
+my ( $screen_rows, $screen_cols, $screen_xpixels, $screen_ypixels );
+
+my %languages = (
+				  'afrikaans'      => 'af',
+				  'albanian'       => 'sq',
+				  'amharic'        => 'am',
+				  'arabic'         => 'ar',
+				  'armenian'       => 'hy',
+				  'azerbaijani'    => 'az',
+				  'basque'         => 'eu',
+				  'belarusian'     => 'be',
+				  'bengali'        => 'bn',
+				  'bihari'         => 'bh',
+				  'breton'         => 'br',
+				  'bulgarian'      => 'bg',
+				  'burmese'        => 'my',
+				  'catalan'        => 'ca',
+				  'cherokee'       => 'chr',
+				  'chinese'        => 'zh',
+				  'chinese simp'   => 'zh-cn',
+				  'chinese trad'   => 'zh-tw',
+				  'corsican'       => 'co',
+				  'croatian'       => 'hr',
+				  'czech'          => 'cs',
+				  'danish'         => 'da',
+				  'dhivehi'        => 'dv',
+				  'dutch'          => 'nl',
+				  'english'        => 'en',
+				  'esperanto'      => 'eo',
+				  'estonian'       => 'et',
+				  'faroese'        => 'fo',
+				  'filipino'       => 'tl',
+				  'finnish'        => 'fi',
+				  'french'         => 'fr',
+				  'frisian'        => 'fy',
+				  'galician'       => 'gl',
+				  'georgian'       => 'ka',
+				  'german'         => 'de',
+				  'greek'          => 'el',
+				  'gujarati'       => 'gu',
+				  'haitian creole' => 'ht',
+				  'hebrew'         => 'iw',
+				  'hindi'          => 'hi',
+				  'hungarian'      => 'hu',
+				  'icelandic'      => 'is',
+				  'indonesian'     => 'id',
+				  'inuktitut'      => 'iu',
+				  'irish'          => 'ga',
+				  'italian'        => 'it',
+				  'japanese'       => 'ja',
+				  'javanese'       => 'jw',
+				  'kannada'        => 'kn',
+				  'kazakh'         => 'kk',
+				  'khmer'          => 'km',
+				  'korean'         => 'ko',
+				  'kurdish'        => 'ku',
+				  'kyrgyz'         => 'ky',
+				  'lao'            => 'lo',
+				  'latin'          => 'la',
+				  'latvian'        => 'lv',
+				  'lithuanian'     => 'lt',
+				  'luxembourgish'  => 'lb',
+				  'macedonian'     => 'mk',
+				  'malay'          => 'ms',
+				  'malayalam'      => 'ml',
+				  'maltese'        => 'mt',
+				  'maori'          => 'mi',
+				  'marathi'        => 'mr',
+				  'mongolian'      => 'mn',
+				  'nepali'         => 'ne',
+				  'norwegian'      => 'no',
+				  'occitan'        => 'oc',
+				  'oriya'          => 'or',
+				  'pashto'         => 'ps',
+				  'persian'        => 'fa',
+				  'polish'         => 'pl',
+				  'portuguese'     => 'pt',
+				  'punjabi'        => 'pa',
+				  'quechua'        => 'qu',
+				  'romanian'       => 'ro',
+				  'russian'        => 'ru',
+				  'sanskrit'       => 'sa',
+				  'scots_gaelic'   => 'gd',
+				  'serbian'        => 'sr',
+				  'sindhi'         => 'sd',
+				  'sinhalese'      => 'si',
+				  'slovak'         => 'sk',
+				  'slovenian'      => 'sl',
+				  'spanish'        => 'es',
+				  'sundanese'      => 'su',
+				  'swahili'        => 'sw',
+				  'swedish'        => 'sv',
+				  'syriac'         => 'syr',
+				  'tajik'          => 'tg',
+				  'tamil'          => 'ta',
+				  'tatar'          => 'tt',
+				  'telugu'         => 'te',
+				  'thai'           => 'th',
+				  'tibetan'        => 'bo',
+				  'tonga'          => 'to',
+				  'turkish'        => 'tr',
+				  'ukrainian'      => 'uk',
+				  'urdu'           => 'ur',
+				  'uzbek'          => 'uz',
+				  'uighur'         => 'ug',
+				  'vietnamese'     => 'vi',
+				  'welsh'          => 'cy',
+				  'yiddish'        => 'yi',
+				  'yoruba'         => 'yo',
+);
+
+# get window size for country listing
+open( TTY, "+</dev/tty" ) or $has_tty = 0;
+if ($has_tty) {
+	unless ( ioctl( TTY, &TIOCGWINSZ, $winsize = '' ) ) {
+		die sprintf "$0: ioctl TIOCGWINSZ (%08x: $!)\n", &TIOCGWINSZ;
+	}
+	( $screen_rows, $screen_cols, $screen_xpixels, $screen_ypixels ) = unpack( 'S4', $winsize );
+}
+
+getopts( 'f:t:o:hl', \my %opts );
+if ( defined $opts{h} && $opts{h} == 1 ) { usage() }
+if ( defined $opts{l} && $opts{l} == 1 ) { usage() }
+my ( $from, $to ) = ( $opts{f}, $opts{t} );
+if ( !defined $opts{f} ) { $from = ''; }
+if ( !defined $opts{t} ) { $to   = 'en'; }
+
+# Internet there?
+my $timeout = 3;
+my $hostname = 'www.google.com';
+my $port = 80;
+my $iaddr = inet_aton($hostname);
+eval {
+	my $paddr = sockaddr_in($port, $iaddr);
+};
+if ($@) {
+	die "tranny error: no Internet connection (required)";
+}
+
+# if text was passed on the command line
+if ( defined $ARGV[0] ) {
+	$original = $ARGV[0];
+# text is from a file
+} elsif ( defined $opts{o} ) {
+	# slurp from file
+	open FILE, $opts{o} or die "-o argument: couldn't open file: $!";
+	local $/ = undef;
+	$original = <FILE>;
+	close FILE;
+# text is from STDIN
+} else {
+	# slurp STDIN
+	local $/ = undef;
+	$original = <STDIN>;
+}
+
+my $ua = LWP::UserAgent->new;
+$ua->agent("PGDict/1.0");
+my $request =
+  HTTP::Request->new( GET => "http://ajax.googleapis.com/ajax/services/language/translate?v=1.0&langpair=$from|$to&q=$original" );
+my $response = $ua->request($request);
+
+if ( $response->is_success ) {
+	my $perl_res = from_json( $response->content );
+	if ( $perl_res->{'responseStatus'} eq '200' ) {
+		print $perl_res->{'responseData'}->{'translatedText'} . "\n";
+	} else {
+		warn "error " . $perl_res->{'responseDetails'} . "\n";
+	}
+} else {
+	print $response->status_line . "\n";
+}
+
+sub usage {
+	print "usage: ";
+	print "\ttranny -f language_code -t language_code [original text]\n\n";
+	print "-f language_code (optional)\n\n";
+	print "-t language_code (optional)\n\n";
+	print "-o original_file (optional)\n\n";
+	print "-h this help\n\n";
+	print "-l language list\n\n";
+	print "Tranny uses Google Translate and requires an Internet connection to work.\n";
+	print "Text is translated from STDIN, from the command line or a file with -o.\n\n";
+	print "By default,the 'from' language is automatically detected and translated to English (en).\n\n";
+	if ( defined $opts{l} && $opts{l} == 1 ) { list_languages() }
+	exit;
+}
+
+sub list_languages {
+	my $num_columns = ceil( $screen_cols / 23 );
+	my $num_rows = ceil ( keys(%languages) /$num_columns );
+	my $row = 0;
+	my $col = 0;
+	my @formatted_languages = ( );
+	foreach my $key ( sort ( keys(%languages) ) ) {
+		$row++;
+		$formatted_languages[$col][$row] =  sprintf( "%-14s %-6s", $key, $languages{$key} );
+		if ( $row == $num_rows ){
+			$row = 0;
+			$col++;
+		}
+	}
+	for ($row = 0; $row <= $num_rows; $row++) {
+		for ($col = 0; $col <= $num_columns; $col++) {
+			if ( defined $formatted_languages[$col][$row] ){
+				print $formatted_languages[$col][$row];
+			}
+		}
+		print "\n";
+	}
+}
