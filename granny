@@ -190,8 +190,8 @@ if ($use_google)
 }
 else
 {
-  $hostname = 'api.apertium.org';
-  $serv = "http://api.apertium.org/json/translate?langpair=$from|$to&q=$original";
+  $hostname = 'apy.projectjj.com';
+  $serv = "http://apy.projectjj.com/translate?langpair=$from|$to&q=$original";
 }
 
 my $iaddr = inet_aton($hostname);
